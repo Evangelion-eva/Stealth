@@ -1,0 +1,46 @@
+﻿{
+    "ShowConsole":  false,
+    "DefaultMode":  "auto",
+    "AnswerTimeoutSec":  40,
+    "CamouflageMode":  "dark",
+    "WindowPos":  {
+                      "X":  1044,
+                      "Y":  121,
+                      "W":  480,
+                      "H":  280
+                  },
+    "Hotkeys":  {
+                    "AutoSolve":  "Ctrl+Shift+T",
+                    "TabSolve":  "Ctrl+Shift+S",
+                    "Java":  "Ctrl+Shift+J",
+                    "Cpp":  "Ctrl+Shift+C",
+                    "Python":  "Ctrl+Shift+Y",
+                    "Browser":  "Ctrl+Shift+B",
+                    "Screenshot":  "Ctrl+Shift+P",
+                    "Panic":  "Ctrl+Shift+Q"
+                },
+    "Buttons":  {
+                    "Screenshot":  true,
+                    "Browser":  true,
+                    "AutoSolve":  true,
+                    "TabSolve":  true,
+                    "Java":  true,
+                    "Cpp":  true,
+                    "Python":  true,
+                    "Settings":  true
+                },
+    "Keys":  [
+                 {
+                     "Provider":  "groq",
+                     "Key":  "YOUR_GROQ_API_KEY_HERE"
+                 },
+                 {
+                     "Provider":  "gemini",
+                     "Key":  "YOUR_GEMINI_API_KEY_HERE"
+                 },
+                 {
+                     "Provider":  "openrouter",
+                     "Key":  "YOUR_OPENROUTER_API_KEY_HERE"
+                 }
+             ]
+}

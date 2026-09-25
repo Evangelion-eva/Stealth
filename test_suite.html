@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Universal Stealth Assistant - Live Test Suite</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-bright: #f0f6fc;
+      --accent-blue: #58a6ff;
+      --accent-green: #3fb950;
+      --accent-orange: #f0883e;
+      --accent-purple: #bc8cff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 30px;
+      line-height: 1.6;
+    }
+    .header {
+      max-width: 900px;
+      margin: 0 auto 30px auto;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 20px;
+    }
+    h1 { color: var(--text-bright); font-size: 26px; margin-bottom: 8px; }
+    p.subtitle { color: #8b949e; font-size: 14px; }
+    .badge-bar {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge-blue { background: rgba(56, 139, 253, 0.15); color: var(--accent-blue); border: 1px solid rgba(56, 139, 253, 0.4); }
+    .badge-green { background: rgba(63, 185, 80, 0.15); color: var(--accent-green); border: 1px solid rgba(63, 185, 80, 0.4); }
+    .badge-orange { background: rgba(240, 136, 62, 0.15); color: var(--accent-orange); border: 1px solid rgba(240, 136, 62, 0.4); }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 25px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .tag {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #21262d;
+      color: #8b949e;
+    }
+    .q-text {
+      font-size: 15px;
+      color: var(--text-bright);
+      margin-bottom: 16px;
+    }
+    .options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .opt {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0d1117;
+      font-size: 13.5px;
+      color: var(--text);
+    }
+    .opt b { color: var(--accent-blue); margin-right: 6px; }
+
+    pre {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      font-family: "Consolas", "Fira Code", monospace;
+      font-size: 13px;
+      color: #e6edf3;
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+
+    .hotkey-banner {
+      background: #161b22;
+      border: 1px dashed #388bfd;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 25px;
+      display: flex;
+      justify-content: space-around;
+      text-align: center;
+    }
+    .hk-item { font-size: 13px; }
+    .hk-key {
+      display: inline-block;
+      padding: 2px 7px;
+      background: #21262d;
+      border: 1px solid #484f58;
+      border-radius: 4px;
+      font-family: monospace;
+      color: #58a6ff;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Universal Stealth Assistant — Test Harness</h1>
+    <p class="subtitle">Use this page to test on-screen OCR text recognition, multiple-choice solver, and coding synthesis (Java, C++, Python).</p>
+    <div class="badge-bar">
+      <span class="badge badge-blue">Blue: Instant Screenshot</span>
+      <span class="badge badge-green">Green: Stealth Browser</span>
+      <span class="badge badge-orange">Orange: AI Quiz & Code Solver</span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <div class="hotkey-banner">
+      <div class="hk-item">
+        <div class="hk-key">Ctrl + Shift + T</div>
+        <div>Auto-Solve Question</div>
+      </div>
+      <div class="hk-item">
+        <div class="hk-key">Ctrl + Shift + J</div>
+        <div>Solve in Java</div>
+      </div>
+      <div class="hk-item">
+        <div class="hk-key">Ctrl + Shift + C</div>
+        <div>Solve in C++</div>
+      </div>
+      <div class="hk-item">
+        <div class="hk-key">Ctrl + Shift + Y</div>
+        <div>Solve in Python</div>
+      </div>
+      <div class="hk-item">
+        <div class="hk-key">Ctrl + Shift + B</div>
+        <div>Stealth Browser</div>
+      </div>
+    </div>
+
+    <!-- Question 1: Aptitude & Reasoning (Directions) -->
+    <div class="card">
+      <div class="card-title">
+        <span>Question 1: Direction Reasoning</span>
+        <span class="tag">Reasoning / Aptitude</span>
+      </div>
+      <div class="q-text">
+        A man walks 6 km towards the North, then turns right and walks 8 km. Then he turns right again and walks 6 km. In which direction is he now from his starting point, and what is the distance?
+      </div>
+      <div class="options">
+        <div class="opt"><b>A</b> 8 km, East</div>
+        <div class="opt"><b>B</b> 8 km, West</div>
+        <div class="opt"><b>C</b> 10 km, North-East</div>
+        <div class="opt"><b>D</b> 14 km, South</div>
+      </div>
+    </div>
+
+    <!-- Question 2: Seating Arrangement -->
+    <div class="card">
+      <div class="card-title">
+        <span>Question 2: Seating Arrangement</span>
+        <span class="tag">Logical Deduction</span>
+      </div>
+      <div class="q-text">
+        Five friends (P, Q, R, S, T) are sitting in a row facing North. S is between T and Q. Q is to the immediate left of R. P is to the immediate left of T. Who is sitting in the exact middle of the row?
+      </div>
+      <div class="options">
+        <div class="opt"><b>A</b> P</div>
+        <div class="opt"><b>B</b> T</div>
+        <div class="opt"><b>C</b> S</div>
+        <div class="opt"><b>D</b> Q</div>
+      </div>
+    </div>
+
+    <!-- Question 3: Data Structures & Algorithms -->
+    <div class="card">
+      <div class="card-title">
+        <span>Question 3: Complexity & Algorithms</span>
+        <span class="tag">Computer Science</span>
+      </div>
+      <div class="q-text">
+        What is the worst-case time complexity of searching an element in a balanced AVL Tree with N nodes, and which rotation is required when a node is inserted into the right subtree of the right child?
+      </div>
+      <div class="options">
+        <div class="opt"><b>A</b> O(N), Left Rotation (LL)</div>
+        <div class="opt"><b>B</b> O(log N), Left Rotation (RR)</div>
+        <div class="opt"><b>C</b> O(N log N), Right-Left Rotation (RL)</div>
+        <div class="opt"><b>D</b> O(1), Right Rotation (RR)</div>
+      </div>
+    </div>
+
+    <!-- Coding Problem 1: LeetCode Style Problem -->
+    <div class="card">
+      <div class="card-title">
+        <span>Coding Challenge: Two Sum (Optimal)</span>
+        <span class="tag">Algorithms / Coding</span>
+      </div>
+      <div class="q-text">
+        Given an array of integers <code>nums</code> and an integer <code>target</code>, return indices of the two numbers such that they add up to <code>target</code>. You may assume that each input would have exactly one solution, and you may not use the same element twice.
+      </div>
+      <pre>
+Example 1:
+Input: nums = [2, 7, 11, 15], target = 9
+Output: [0, 1]
+Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
+
+Constraints:
+2 <= nums.length <= 10^4
+-10^9 <= nums[i] <= 10^9
+      </pre>
+      <div style="margin-top: 10px; font-size: 13px; color: #8b949e;">
+        👉 <i>Test: Press <kbd style="color:#58a6ff;">Ctrl + Shift + J</kbd> for Java, <kbd style="color:#58a6ff;">Ctrl + Shift + C</kbd> for C++, or <kbd style="color:#58a6ff;">Ctrl + Shift + Y</kbd> for Python.</i>
+      </div>
+    </div>
+
+    <!-- Coding Problem 2: Dynamic Programming -->
+    <div class="card">
+      <div class="card-title">
+        <span>Coding Challenge: Longest Increasing Subsequence</span>
+        <span class="tag">Dynamic Programming</span>
+      </div>
+      <div class="q-text">
+        Given an integer array <code>nums</code>, return the length of the longest strictly increasing subsequence. Solve it in <code>O(N log N)</code> time complexity using binary search patience sorting.
+      </div>
+      <pre>
+Example 1:
+Input: nums = [10, 9, 2, 5, 3, 7, 101, 18]
+Output: 4
+Explanation: The longest increasing subsequence is [2, 3, 7, 101], therefore the length is 4.
+      </pre>
+    </div>
+
+  </div>
+
+</body>
+</html>

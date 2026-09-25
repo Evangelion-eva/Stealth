@@ -1,0 +1,28 @@
+﻿# ────────────────────────────────────────────────────────────────
+#  .gitignore — Stealth Overlay
+#  NEVER commit API keys, secrets, or user-specific config files.
+# ────────────────────────────────────────────────────────────────
+
+# ── Live config (contains API keys) ─────────────────────────────
+config.json
+keys.txt
+
+# A committed template without real keys is safe (see config.example.json)
+
+# ── Local / OS noise ─────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.lnk
+
+# ── PowerShell session state ──────────────────────────────────────
+*.log
+stealth.log
+*.tmp
+
+# ── WebView2 runtime (large binary, not source) ───────────────────
+wv2sdk/
+
+# ── Sensitive extras ─────────────────────────────────────────────
+*.env
+secrets.*
