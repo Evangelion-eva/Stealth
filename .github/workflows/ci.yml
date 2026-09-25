@@ -1,0 +1,69 @@
+﻿name: CI — Validate & Lint
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  validate:
+    name: Validate project files
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify config.example.json is valid JSON
+        shell: pwsh
+        run: |
+          $file = "config.example.json"
+          if (-not (Test-Path $file)) {
+            Write-Error "config.example.json is missing — add it so new users can set up easily."
+            exit 1
+          }
+          try {
+            $null = Get-Content $file -Raw | ConvertFrom-Json
+            Write-Host "config.example.json is valid JSON."
+          } catch {
+            Write-Error "config.example.json is not valid JSON: $_"
+            exit 1
+          }
+
+      - name: Ensure no real API keys are committed
+        shell: pwsh
+        run: |
+          $patterns = @(
+            "gsk_[A-Za-z0-9]{40,}",        # Groq
+            "sk-or-v1-[A-Za-z0-9]{60,}",   # OpenRouter
+            "AIza[A-Za-z0-9_\-]{35}"        # Gemini / Google AI
+          )
+          $files = Get-ChildItem -Recurse -File -Include *.ps1,*.json,*.bat,*.vbs,*.md,*.txt,*.env
+          $found = $false
+          foreach ($f in $files) {
+            $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+            foreach ($p in $patterns) {
+              if ($content -match $p) {
+                Write-Error "Potential API key found in: $($f.FullName)"
+                $found = $true
+              }
+            }
+          }
+          if ($found) { exit 1 }
+          Write-Host "No API keys detected in committed files."
+
+      - name: Check PowerShell syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "StealthOverlay.ps1").Path,
+            [ref]$null,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host "StealthOverlay.ps1 syntax OK ($($errors.Count) errors)."

@@ -26,3 +26,4 @@ wv2sdk/
 # ── Sensitive extras ─────────────────────────────────────────────
 *.env
 secrets.*
+.aider*
