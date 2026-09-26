@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proctored Focus & Tab-Switch Diagnostic Test</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #131b2e;
+      --border: #222f4c;
+      --text: #c5d1e8;
+      --text-bright: #ffffff;
+      --green: #10b981;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --blue: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+    h1 { color: var(--text-bright); font-size: 24px; margin-bottom: 6px; }
+    p.sub { color: #8899b7; font-size: 14px; }
+
+    /* Live Status Banner */
+    .status-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 24px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      font-weight: bold;
+      transition: all 0.2s ease;
+      background: rgba(16, 185, 129, 0.12);
+      border: 2px solid var(--green);
+      color: var(--green);
+    }
+    .status-banner.violation {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: var(--red);
+      color: var(--red);
+      animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to { transform: scale(1.01); }
+    }
+    .status-text { font-size: 18px; display: flex; align-items: center; gap: 10px; }
+    .status-dot { width: 14px; height: 14px; border-radius: 50%; background: currentColor; }
+
+    /* Grid counters */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-val {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text-bright);
+      margin-top: 4px;
+    }
+    .stat-lbl {
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #7d8ea8;
+      letter-spacing: 0.5px;
+    }
+
+    /* Test Instructions */
+    .instructions {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin-bottom: 24px;
+    }
+    .instructions h3 { color: var(--text-bright); font-size: 15px; margin-bottom: 8px; }
+    .instructions ol { margin-left: 20px; font-size: 13.5px; color: #a6b8d4; }
+    .instructions li { margin-bottom: 6px; }
+
+    /* Log Box */
+    .log-box {
+      background: #060911;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      font-family: "Consolas", monospace;
+      font-size: 12.5px;
+      height: 240px;
+      overflow-y: auto;
+    }
+    .log-item {
+      padding: 4px 6px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      display: flex;
+      justify-content: space-between;
+    }
+    .log-blur { color: #f87171; }
+    .log-focus { color: #34d399; }
+    .log-vis { color: #60a5fa; }
+
+    .btn-row {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    button {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      padding: 7px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { background: #334155; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <h1>Proctored Exam Tab-Switch & Focus Detector</h1>
+      <p class="sub">Simulates the exact focus and visibility tracking algorithms used by Mettl, HackerEarth, TestGorilla, and PSIT OAS.</p>
+    </div>
+
+    <!-- Live Status Banner -->
+    <div id="statusBanner" class="status-banner">
+      <div class="status-text">
+        <span class="status-dot"></span>
+        <span id="statusLabel">TAB IN FOCUS & ACTIVE (SAFE)</span>
+      </div>
+      <div id="statusSub" style="font-size: 13px; font-weight: normal;">No violations detected</div>
+    </div>
+
+    <!-- Counters Grid -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-lbl">Blur Violations</div>
+        <div id="blurCount" class="stat-val" style="color: #ef4444;">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-lbl">Tab Hidden Count</div>
+        <div id="visCount" class="stat-val" style="color: #f59e0b;">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-lbl">Focus Regained</div>
+        <div id="focusCount" class="stat-val" style="color: #10b981;">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-lbl">Document Focus</div>
+        <div id="docFocus" class="stat-val" style="font-size: 18px; margin-top: 10px; color: #60a5fa;">TRUE</div>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="instructions">
+      <h3>How to Test the Overlay:</h3>
+      <ol>
+        <li>Keep this browser window active and visible on your screen.</li>
+        <li>Click any dot button on the Stealth Overlay bar (<code>[AI]</code>, <code>[P]</code>, <code>[J]</code>, <code>[C]</code>, <code>[Py]</code>).</li>
+        <li>Notice that <b>Blur Violations stays at 0</b> and <b>Document Focus remains TRUE</b>. The browser does not lose focus!</li>
+        <li>Click an answer popup or floating solution card to dismiss or copy: notice no blur violation occurs.</li>
+        <li>To verify this detector works: click on your Windows Taskbar or another application (Notepad). The violation counter will immediately increment to 1 and flash red.</li>
+      </ol>
+    </div>
+
+    <!-- Event Log -->
+    <h3 style="font-size: 14px; margin-bottom: 8px; color: #8899b7;">Real-Time Browser Event Stream:</h3>
+    <div id="logBox" class="log-box"></div>
+    <div class="btn-row">
+      <button onclick="clearLogs()">Clear Log History</button>
+      <button onclick="resetCounters()">Reset Counters</button>
+    </div>
+  </div>
+
+  <script>
+    let blurs = 0;
+    let focusCount = 0;
+    let visHidden = 0;
+
+    const banner = document.getElementById('statusBanner');
+    const statusLabel = document.getElementById('statusLabel');
+    const statusSub = document.getElementById('statusSub');
+    const blurEl = document.getElementById('blurCount');
+    const visEl = document.getElementById('visCount');
+    const focusEl = document.getElementById('focusCount');
+    const docFocusEl = document.getElementById('docFocus');
+    const logBox = document.getElementById('logBox');
+
+    function log(msg, cls) {
+      const d = new Date();
+      const time = d.toTimeString().split(' ')[0] + '.' + String(d.getMilliseconds()).padStart(3, '0');
+      const div = document.createElement('div');
+      div.className = 'log-item ' + (cls || '');
+      div.innerHTML = `<span>[${time}] ${msg}</span><span>hasFocus: ${document.hasFocus()}</span>`;
+      logBox.insertBefore(div, logBox.firstChild);
+    }
+
+    // 1. window.onblur (Window lost focus)
+    window.addEventListener('blur', () => {
+      blurs++;
+      blurEl.textContent = blurs;
+      docFocusEl.textContent = "FALSE";
+      docFocusEl.style.color = "#ef4444";
+      banner.className = 'status-banner violation';
+      statusLabel.textContent = 'FOCUS LOST / TAB SWITCH DETECTED!';
+      statusSub.textContent = `Violation #${blurs} recorded at ${new Date().toLocaleTimeString()}`;
+      log(`⚠️ window.blur event (Focus lost from browser window)`, 'log-blur');
+    });
+
+    // 2. window.onfocus (Window gained focus)
+    window.addEventListener('focus', () => {
+      focusCount++;
+      focusEl.textContent = focusCount;
+      docFocusEl.textContent = "TRUE";
+      docFocusEl.style.color = "#10b981";
+      banner.className = 'status-banner';
+      statusLabel.textContent = 'TAB IN FOCUS & ACTIVE (SAFE)';
+      statusSub.textContent = 'Exam portal active';
+      log(`✅ window.focus event (Browser regained active focus)`, 'log-focus');
+    });
+
+    // 3. document.visibilitychange (Page Visibility API)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        visHidden++;
+        visEl.textContent = visHidden;
+        log(`🚨 document.visibilitychange -> HIDDEN (Tab was switched or minimized)`, 'log-blur');
+      } else {
+        log(`ℹ️ document.visibilitychange -> VISIBLE`, 'log-vis');
+      }
+    });
+
+    // Periodic check
+    setInterval(() => {
+      const hasFocus = document.hasFocus();
+      docFocusEl.textContent = hasFocus ? "TRUE" : "FALSE";
+      docFocusEl.style.color = hasFocus ? "#10b981" : "#ef4444";
+    }, 250);
+
+    function clearLogs() {
+      logBox.innerHTML = '';
+    }
+
+    function resetCounters() {
+      blurs = 0; focusCount = 0; visHidden = 0;
+      blurEl.textContent = '0';
+      visEl.textContent = '0';
+      focusEl.textContent = '0';
+      banner.className = 'status-banner';
+      statusLabel.textContent = 'TAB IN FOCUS & ACTIVE (SAFE)';
+      statusSub.textContent = 'No violations detected';
+      logBox.innerHTML = '';
+      log('Counters reset.', 'log-vis');
+    }
+
+    log('Diagnostic page initialized. Ready for overlay clicks.', 'log-vis');
+  </script>
+
+</body>
+</html>
