@@ -663,239 +663,167 @@ function Show-QuizAnswer {
     if ($script:aiLabel) { try { $script:aiLabel.Close(); $script:aiLabel.Dispose() } catch {}; $script:aiLabel = $null }
     if ($script:codeForm) { try { $script:codeForm.Close(); $script:codeForm.Dispose() } catch {}; $script:codeForm = $null }
 
-    # Clean lines and count
-    $lines = @()
-    $maxLineLen = 25
-    foreach ($line in ($Answer -split "\r?\n")) {
-        $t = $line.Trim()
-        if ($t -ne '') {
-            $lines += $t
-            if ($t.Length -gt $maxLineLen) { $maxLineLen = $t.Length }
+    # Parse and clean answer lines (OAS Launcher exact matching algorithm)
+    $cleanRaw = $Answer.Replace('**', '').Replace('`', '').Trim()
+    $rawLines = ($cleanRaw -split "`r?`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+    $displayText = ""
+
+    # Priority 0: Multi-question lines (e.g. Q1: ..., Q2: ...)
+    $qLines = @()
+    foreach ($line in $rawLines) {
+        if ($line -match '(?i)^Q\d+[:\-\s]') { $qLines += $line }
+    }
+    if ($qLines.Count -gt 0) {
+        $displayText = $qLines -join "`r`n"
+    }
+
+    # Priority 1: Check for explicit "correct (answer|option) is X" or "Ans: X"
+    if (-not $displayText) {
+        foreach ($line in $rawLines) {
+            if ($line -match '(?i)(?:correct\s+(?:option|answer|choice)\s+(?:is\s*)?[:\-]?\s*|^Ans(?:wer)?\s*[:\-]\s*)([A-D]\s*[\)\.\:\-]?\s*\(?[^\r\n]+)') {
+                $displayText = "Ans: " + $matches[1].Trim().TrimEnd('.')
+                break
+            }
         }
     }
 
-    $finalAnswerText = $lines -join "`r`n"
-    $script:latestCodeToCopy = $finalAnswerText
-    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    # Priority 2: Line starting with option letter, e.g. "B - MergeSort..." or "B (Merge Sort)"
+    if (-not $displayText) {
+        foreach ($line in $rawLines) {
+            if ($line -match '^([A-D]\s*[\)\.\:\-]\s*.+)$' -or $line -match '^([A-D]\s*\([^\r\n]+\))$') {
+                $displayText = "Ans: " + $matches[1].Trim().TrimEnd('.')
+                break
+            }
+        }
+    }
 
-    # Remembered Size & Position Logic
-    $hasSavedPos = ($script:winX -gt 0 -and $script:winY -gt 0)
-    $ansX = if ($hasSavedPos) { $script:winX } else { [Math]::Max(20, [int]($scr.Width - 520)) }
-    $ansY = if ($hasSavedPos) { $script:winY } else { 32 }
-    
-    $ansW = if ($script:winW -gt 200) {
-        $script:winW
-    } else {
-        [Math]::Max(360, [Math]::Min(640, [int]($maxLineLen * 8.2 + 36)))
+    # Priority 3: Standalone 'X (Option Text)' anywhere in line
+    if (-not $displayText) {
+        foreach ($line in $rawLines) {
+            if ($line -match '\b([A-D]\s*\([^\r\n]+\))') {
+                $displayText = "Ans: " + $matches[1].Trim().TrimEnd('.')
+                break
+            }
+        }
     }
-    $ansH = if ($script:winH -gt 100) {
-        $script:winH
-    } else {
-        [Math]::Max(110, [Math]::Min(420, [int]($lines.Count * 21.0 + 38)))
+
+    # Priority 4: Line starting with an option letter like "B" or "B. Something"
+    if (-not $displayText) {
+        foreach ($line in $rawLines) {
+            if ($line -match '^[A-D]\b') {
+                $displayText = "Ans: " + $line.TrimEnd('.')
+                break
+            }
+        }
     }
+
+    # Priority 5: Fallback filter out boilerplate phrases
+    if (-not $displayText) {
+        $filteredLines = @()
+        $skipPhrases = @('here is', 'the correct', 'based on', 'i think', 'sure', 'hello', 'question:')
+        foreach ($line in $rawLines) {
+            $lower = $line.ToLower()
+            $skip = $false
+            if ($rawLines.Count -gt 1) {
+                foreach ($sp in $skipPhrases) {
+                    if ($lower.StartsWith($sp)) { $skip = $true; break }
+                }
+            }
+            if (-not $skip) { $filteredLines += $line }
+        }
+        $fullText = ($filteredLines -join "`r`n").Trim()
+        if (-not $fullText) { $fullText = $cleanRaw }
+        $displayText = if ($fullText -match '(?i)^(Ans|Q\d+)\s*[:\-]') { $fullText } else { "Ans: $fullText" }
+    }
+
+    $script:latestCodeToCopy = $displayText
+    try { [System.Windows.Forms.Clipboard]::SetText($displayText) } catch {}
+
+    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $font = New-Object System.Drawing.Font('Segoe UI', 10.5, [System.Drawing.FontStyle]::Bold)
+
+    $maxW = [Math]::Min(750, [int]($scr.Width * 0.70))
+    $flags = [System.Windows.Forms.TextFormatFlags]::WordBreak -bor [System.Windows.Forms.TextFormatFlags]::LeftAndRightPadding
+    $size = [System.Windows.Forms.TextRenderer]::MeasureText($displayText, $font, (New-Object System.Drawing.Size($maxW, 0)), $flags)
+
+    $ansW = [Math]::Min($maxW, [int]($size.Width + 24))
+    $ansH = [int]($size.Height + 12)
+
+    # Dynamic positioning: placed directly below the options in the screen (like OAS launcher)
+    $ansX = [Math]::Max(36, [int]($scr.Width * 0.03))
+    $ansY = [Math]::Max(360, [int]($scr.Height * 0.57))
+    if ($ansY + $ansH -gt ($scr.Height - 35)) {
+        $ansY = [Math]::Max(50, [int]($scr.Height - $ansH - 45))
+    }
+
+    # Camouflage colors (100% transparent background)
+    $isDark = ($script:config.CamouflageMode -eq "dark")
+    $bgKeyColor = if ($isDark) { [System.Drawing.Color]::FromArgb(16, 16, 24) } else { [System.Drawing.Color]::White }
+    $fgColor    = if ($isDark) { [System.Drawing.Color]::FromArgb(240, 246, 252) } else { [System.Drawing.Color]::FromArgb(25, 25, 25) }
 
     $af = New-Object System.Windows.Forms.Form
     $af.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-    $af.Size            = New-Object System.Drawing.Size($ansW, $ansH)
-    $af.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
-    $af.Location        = New-Object System.Drawing.Point($ansX, $ansY)
-    $af.BackColor       = $script:keyColor
-    $af.TransparencyKey = $script:keyColor
+    $af.BackColor       = $bgKeyColor
+    $af.TransparencyKey = $bgKeyColor
     $af.TopMost         = $true
     $af.ShowInTaskbar   = $false
+    $af.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
+    $af.Width           = $ansW
+    $af.Height          = $ansH
+    $af.Location        = New-Object System.Drawing.Point($ansX, $ansY)
     $af.KeyPreview      = $true
 
-    [void]$af.Handle
-    [StealthAPI]::ApplyStealthAffinity($af.Handle, $script:config.StealthAffinity) | Out-Null
-    $ex = [StealthAPI]::GetWindowLong($af.Handle, [StealthAPI]::GWL_EXSTYLE)
-    [StealthAPI]::SetWindowLong($af.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW) | Out-Null
-    [StealthAPI]::SetWindowPos($af.Handle, [StealthAPI]::HWND_TOPMOST, $ansX, $ansY, $ansW, $ansH, ([StealthAPI]::SWP_SHOWWINDOW -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
-
-    # Header Bar: 100% Transparent
-    $tb = New-Object System.Windows.Forms.Panel
-    $tb.Dock      = [System.Windows.Forms.DockStyle]::Top
-    $tb.Height    = 22
-    $tb.BackColor = $script:keyColor
-    $tb.Padding   = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
-
-    $badge = New-Object System.Windows.Forms.Label
-    $badge.Text      = "[Ans]"
-    $badge.Dock      = [System.Windows.Forms.DockStyle]::Left
-    $badge.AutoSize  = $true
-    $badge.BackColor = $script:keyColor
-    $badge.ForeColor = [System.Drawing.Color]::FromArgb(52, 211, 153)
-    $badge.Font      = New-Object System.Drawing.Font("Segoe UI", 8.0, [System.Drawing.FontStyle]::Bold)
-    $badge.Cursor    = [System.Windows.Forms.Cursors]::SizeAll
-
-    # Contrast Invert Button (Camouflage for White vs Dark backgrounds)
-    $btnInv = New-Object System.Windows.Forms.Button
-    $btnInv.Text = if ($script:config.CamouflageMode -eq "light") { "Lit" } else { "Inv" }
-    $btnInv.Size = New-Object System.Drawing.Size(32, 18)
-    $btnInv.Dock = [System.Windows.Forms.DockStyle]::Left
-    $btnInv.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $btnInv.FlatAppearance.BorderSize = 0
-    $btnInv.BackColor = if ($script:config.CamouflageMode -eq "light") { [System.Drawing.Color]::FromArgb(200, 210, 225) } else { [System.Drawing.Color]::FromArgb(40, 45, 60) }
-    $btnInv.ForeColor = if ($script:config.CamouflageMode -eq "light") { [System.Drawing.Color]::Black } else { [System.Drawing.Color]::White }
-    $btnInv.Font = New-Object System.Drawing.Font("Segoe UI", 7.0, [System.Drawing.FontStyle]::Bold)
-    $btnInv.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text        = $displayText
+    $lbl.Dock        = [System.Windows.Forms.DockStyle]::Fill
+    $lbl.Font        = $font
+    $lbl.ForeColor   = $fgColor
+    $lbl.BackColor   = $bgKeyColor
+    $lbl.TextAlign   = [System.Drawing.ContentAlignment]::TopLeft
+    $lbl.Padding     = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
+    $lbl.BorderStyle = [System.Windows.Forms.BorderStyle]::None
+    $lbl.Cursor      = [System.Windows.Forms.Cursors]::Hand
 
     $dismissAction = {
         if ($script:aiTimer) { try { $script:aiTimer.Stop(); $script:aiTimer.Dispose() } catch {}; $script:aiTimer = $null }
         if ($script:aiLabel) { try { $script:aiLabel.Close(); $script:aiLabel.Dispose() } catch {}; $script:aiLabel = $null }
     }
 
-    $btnClose = New-Object System.Windows.Forms.Button
-    $btnClose.Text = "X"
-    $btnClose.Size = New-Object System.Drawing.Size(20, 18)
-    $btnClose.Dock = [System.Windows.Forms.DockStyle]::Right
-    $btnClose.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $btnClose.FlatAppearance.BorderSize = 0
-    $btnClose.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
-    $btnClose.ForeColor = [System.Drawing.Color]::White
-    $btnClose.Font = New-Object System.Drawing.Font("Segoe UI", 7.5, [System.Drawing.FontStyle]::Bold)
-    $btnClose.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $btnClose.TabStop = $false
-    $btnClose.Add_Click($dismissAction)
-    $btnClose.Add_MouseDown({ param($s,$e) & $dismissAction })
-
-    # Guaranteed Working Copy Button (Using Tag + Retry Loop)
-    $btnCopy = New-Object System.Windows.Forms.Button
-    $btnCopy.Text = "Copy"
-    $btnCopy.Tag  = $finalAnswerText
-    $btnCopy.Size = New-Object System.Drawing.Size(42, 18)
-    $btnCopy.Dock = [System.Windows.Forms.DockStyle]::Right
-    $btnCopy.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $btnCopy.FlatAppearance.BorderSize = 0
-    $btnCopy.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
-    $btnCopy.ForeColor = [System.Drawing.Color]::White
-    $btnCopy.Font = New-Object System.Drawing.Font("Segoe UI", 7.5, [System.Drawing.FontStyle]::Bold)
-    $btnCopy.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $btnCopy.TabStop = $false
-    $btnCopy.Add_Click({
+    # Left-click dismisses immediately
+    $af.Add_Click($dismissAction)
+    $af.Add_MouseDown({ param($s,$e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $dismissAction } })
+    $lbl.Add_Click($dismissAction)
+    $lbl.Add_MouseDown({
         param($s,$e)
-        $txtToCopy = [string]$s.Tag
-        if (-not $txtToCopy) { $txtToCopy = $script:latestCodeToCopy }
-        if ($txtToCopy) {
-            for ($attempt = 0; $attempt -lt 5; $attempt++) {
-                try {
-                    [System.Windows.Forms.Clipboard]::SetText($txtToCopy)
-                    break
-                } catch {
-                    Start-Sleep -Milliseconds 40
-                }
-            }
-            $s.Text = "OK"
-            $s.BackColor = [System.Drawing.Color]::FromArgb(16, 185, 129)
-            $rt = New-Object System.Windows.Forms.Timer; $rt.Interval = 900
-            $rt.Add_Tick({ param($snd,$ev) $s.Text = "Copy"; $s.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235); $snd.Stop(); $snd.Dispose() })
-            $rt.Start()
-        }
-    })
-
-    $tb.Controls.Add($badge)
-    $tb.Controls.Add($btnInv)
-    $tb.Controls.Add($btnCopy)
-    $tb.Controls.Add($btnClose)
-
-    # Safe Drag Support
-    foreach ($ctl in @($tb, $badge)) {
-        $ctl.Add_MouseDown({
-            param($s,$e)
-            if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-                [StealthAPI]::ReleaseCapture() | Out-Null
-                $targetH = if ($s -is [System.Windows.Forms.Form]) { $s.Handle } else { $s.FindForm().Handle }
-                if ($targetH) {
-                    [StealthAPI]::SendMessage($targetH, [StealthAPI]::WM_NCLBUTTONDOWN, ([IntPtr]([StealthAPI]::HTCAPTION)), [IntPtr]::Zero) | Out-Null
-                }
-            }
-        })
-    }
-
-    # Quiz Answer Box (100% Transparent Background, Adaptive High-Contrast Font)
-    $txtAns = New-Object System.Windows.Forms.TextBox
-    $txtAns.Multiline   = $true
-    $txtAns.ReadOnly    = $true
-    $txtAns.ScrollBars  = if ($lines.Count -gt 18) { [System.Windows.Forms.ScrollBars]::Vertical } else { [System.Windows.Forms.ScrollBars]::None }
-    $txtAns.Dock        = [System.Windows.Forms.DockStyle]::Fill
-    $txtAns.BackColor   = $script:keyColor
-    $txtAns.Font        = New-Object System.Drawing.Font("Segoe UI", 10.0, [System.Drawing.FontStyle]::Bold)
-    $txtAns.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-    $txtAns.WordWrap    = $true
-    $txtAns.Text        = $finalAnswerText
-
-    # Apply Camouflage Colors
-    if ($script:config.CamouflageMode -eq "light") {
-        $txtAns.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42) # Jet dark for white background
-        $badge.ForeColor  = [System.Drawing.Color]::FromArgb(15, 23, 42)
-    } else {
-        $txtAns.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252) # Pure white for dark background
-        $badge.ForeColor  = [System.Drawing.Color]::FromArgb(52, 211, 153)
-    }
-
-    # Invert Contrast Toggle on Inv click
-    $btnInv.Add_Click({
-        if ($script:config.CamouflageMode -eq "light") {
-            $script:config.CamouflageMode = "dark"
-            $txtAns.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
-            $badge.ForeColor  = [System.Drawing.Color]::FromArgb(52, 211, 153)
-            $btnInv.Text = "Inv"
-            $btnInv.BackColor = [System.Drawing.Color]::FromArgb(40, 45, 60)
-            $btnInv.ForeColor = [System.Drawing.Color]::White
-        } else {
-            $script:config.CamouflageMode = "light"
-            $txtAns.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
-            $badge.ForeColor  = [System.Drawing.Color]::FromArgb(15, 23, 42)
-            $btnInv.Text = "Lit"
-            $btnInv.BackColor = [System.Drawing.Color]::FromArgb(200, 210, 225)
-            $btnInv.ForeColor = [System.Drawing.Color]::Black
-        }
-        Save-Config
-    })
-
-    $pnlBody = New-Object System.Windows.Forms.Panel
-    $pnlBody.Dock    = [System.Windows.Forms.DockStyle]::Fill
-    $pnlBody.Padding = New-Object System.Windows.Forms.Padding(6, 4, 6, 6)
-    $pnlBody.BackColor = $script:keyColor
-    $pnlBody.Controls.Add($txtAns)
-
-    $escAction = {
-        param($s, $e)
-        if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+        if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
             & $dismissAction
-        }
-    }
-    $af.Add_KeyDown($escAction)
-    $txtAns.Add_KeyDown($escAction)
-
-    # Track and Remember Position & Size
-    $af.Add_LocationChanged({
-        param($s,$e)
-        if ($s.Location.X -gt 0 -and $s.Location.Y -gt 0) {
-            $script:winX = $s.Location.X
-            $script:winY = $s.Location.Y
-            $script:config.WindowPos.X = $s.Location.X
-            $script:config.WindowPos.Y = $s.Location.Y
-        }
-    })
-    $af.Add_SizeChanged({
-        param($s,$e)
-        if ($s.Width -gt 200 -and $s.Height -gt 100) {
-            $script:winW = $s.Width
-            $script:winH = $s.Height
-            $script:config.WindowPos.W = $s.Width
-            $script:config.WindowPos.H = $s.Height
+        } elseif ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) {
+            # Right click toggles light / dark contrast
+            if ($script:config.CamouflageMode -eq "dark") {
+                $script:config.CamouflageMode = "light"
+                $s.ForeColor = [System.Drawing.Color]::FromArgb(25, 25, 25)
+                $s.BackColor = [System.Drawing.Color]::White
+                $af.BackColor = [System.Drawing.Color]::White
+                $af.TransparencyKey = [System.Drawing.Color]::White
+            } else {
+                $script:config.CamouflageMode = "dark"
+                $s.ForeColor = [System.Drawing.Color]::FromArgb(240, 246, 252)
+                $s.BackColor = [System.Drawing.Color]::FromArgb(16, 16, 24)
+                $af.BackColor = [System.Drawing.Color]::FromArgb(16, 16, 24)
+                $af.TransparencyKey = [System.Drawing.Color]::FromArgb(16, 16, 24)
+            }
         }
     })
+    $af.Add_KeyDown({ param($s,$e) if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { & $dismissAction } })
 
-    # Border resize support
-    $resNW = New-Object ResizableBorderNW($af, 6)
-
-    $af.Controls.Add($pnlBody)
-    $af.Controls.Add($tb)
-    $tb.SendToBack()
-
+    $af.Controls.Add($lbl)
     $af.Show()
-    $af.BringToFront()
+
+    [StealthAPI]::ApplyStealthAffinity($af.Handle, $script:config.StealthAffinity) | Out-Null
+    $ex = [StealthAPI]::GetWindowLong($af.Handle, [StealthAPI]::GWL_EXSTYLE)
+    [StealthAPI]::SetWindowLong($af.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW -bor 0x08000000) | Out-Null
+    [StealthAPI]::SetWindowPos($af.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0, ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
     $script:aiLabel = $af
 
     $timeout = [Math]::Max(15, $script:config.AnswerTimeoutSec) * 1000
@@ -908,7 +836,7 @@ function Show-QuizAnswer {
     })
     $t.Start()
     $script:aiTimer = $t
-    Write-Log "INFO" "Rendered clean Answer window."
+    Write-Log "INFO" "Rendered clean Answer below options: $displayText"
 }
 
 # --- Multi-Tab Stealth Browser ---
@@ -1142,6 +1070,9 @@ $tZout.Add_Click({ $w = Get-ActiveWv; if ($w -and $w.CoreWebView2) { $w.ZoomFact
 
 # --- Extract Content from Current Active Browser Tab (Zero OCR Lag with Non-Blocking Pump) ---
 function Get-ActiveTabContent {
+    if (-not $script:bVisible) {
+        return $null
+    }
     $w = Get-ActiveWv
     if (-not $w -or -not $w.CoreWebView2) {
         return $null
@@ -1180,11 +1111,11 @@ function Get-ActiveTabContent {
 
 function Start-CombinedSolveFlow {
     param([string]$SpecificLang = "auto")
-    $tabText = Get-ActiveTabContent
+    $tabText = if ($script:bVisible) { Get-ActiveTabContent } else { $null }
     if ($tabText -and $tabText.Trim().Length -gt 10) {
         $script:latestOCRText = $tabText
         try { [System.Windows.Forms.Clipboard]::SetText($tabText) } catch {}
-        Write-Log "TAB" "Direct solving extracted browser tab as MCQ..."
+        Write-Log "TAB" "Direct solving active browser tab..."
         Execute-AIAsyncSolve -TextToSolve $tabText -SpecificLang $SpecificLang
     } else {
         Start-AISolveFlow -SpecificLang $SpecificLang
@@ -1426,6 +1357,7 @@ function Execute-AIAsyncSolve {
     $btnOCR.BackColor = [System.Drawing.Color]::FromArgb(255, 215, 0)
     $target = if ($SpecificLang -ne "auto") { $SpecificLang } else { $script:currentMode }
 
+    $script:aiKeyIndex = ($script:aiKeyIndex + 1) % [Math]::Max(1, $script:config.Keys.Count)
     Write-Log "AI" "Sending to AI Engine (Mode: $target, Keys: $($script:config.Keys.Count))..."
 
     # Clean up previous runspace if still active
@@ -1462,8 +1394,10 @@ function Execute-AIAsyncSolve {
 
         if ($lang -in @("java", "cpp", "python")) {
             $sysPrompt = "You are an expert competitive programmer.`nTarget: $lang.`n`nRULES:`n1. Output ONLY compilable optimal class Solution inside a markdown code block (```$lang).`n2. At top of code put: // Time: O(...) | Space: O(...)`n3. Zero conversational text, zero explanation outside code block. Just clean optimal solution."
+        } elseif (-not $isCoding) {
+            $sysPrompt = "You are a student taking a multiple-choice exam. Read the question and all options carefully.`nReply with ONLY:`nOption letter (A, B, C, or D) - [Option text] - [Brief reason in max 7 words]`nExample: 'B - Quicksort is not stable'`nIf multiple questions are present, format each on a new line:`nQ1: B - [Option text] - [Brief reason]`nQ2: A - [Option text] - [Brief reason]`nNo greetings, no conversational filler, no extra text."
         } else {
-            $sysPrompt = "You are an intelligent dual-mode exam solver.`nFirst analyze the input to detect whether it is a CODING PROBLEM (LeetCode, algorithm, function to implement) or MCQ / APTITUDE QUESTIONS.`n`nIF CODING PROBLEM:`nOutput ONLY optimal compilable class Solution inside a markdown code block (```<language>).`nAt top of code: // Time: O(...) | Space: O(...)`nNo conversational text outside code.`n`nIF MCQ / APTITUDE:`nDetect ALL MCQs present in the text and output each question answered clearly with its number:`nQ1: Option [X] - [Option Text]`n- [Direct 1-2 sentence core reason / formula]`n`nQ2: Option [Y] - [Option Text]`n- [Direct 1-2 sentence core reason / formula]`n(Use original question numbers if present, e.g. Q14, Q15). Direct, concise, maximum 3 lines per question. Zero greetings."
+            $sysPrompt = "You are an expert competitive programmer.`nRULES:`n1. Output ONLY optimal compilable class Solution inside a markdown code block.`n2. At top of code: // Time: O(...) | Space: O(...)`n3. Zero conversational text, zero explanation outside code block."
         }
 
         $tried = 0
@@ -1472,32 +1406,59 @@ function Execute-AIAsyncSolve {
             $entry = $keysList[($kIdx + $tried) % $keysList.Count]
             $tried++
             try {
-                $model = if ($entry.Provider -eq 'groq') { 'qwen/qwen3.8-27b' } else { 'openrouter/free' }
-                $body = @{
-                    model       = $model
-                    messages    = @(
-                        @{ role = 'system'; content = $sysPrompt }
-                        @{ role = 'user';   content = $q }
-                    )
-                    max_tokens  = if ($isCoding) { 2048 } else { 1024 }
-                    temperature = 0.05
-                } | ConvertTo-Json -Depth 5
+                $p = [string]$entry.Provider.ToLower()
+                $k = [string]$entry.Key
+                $rawAns = ""
 
-                $url = if ($entry.Provider -eq 'groq') {
-                    'https://api.groq.com/openai/v1/chat/completions'
+                if ($p -eq 'gemini') {
+                    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$k"
+                    $body = @{
+                        system_instruction = @{ parts = @(@{ text = $sysPrompt }) }
+                        contents = @(@{ parts = @(@{ text = $q }) })
+                        generationConfig = @{
+                            maxOutputTokens = if ($isCoding) { 2048 } else { 150 }
+                            temperature     = 0.05
+                        }
+                    } | ConvertTo-Json -Depth 5
+                    $hdr = @{ 'Content-Type' = 'application/json' }
+                    $res = Invoke-RestMethod -Uri $url -Method POST -Headers $hdr -Body $body -TimeoutSec 15 -ErrorAction Stop
+                    $rawAns = $res.candidates[0].content.parts[0].text.Trim()
+                } elseif ($p -eq 'groq') {
+                    $url = 'https://api.groq.com/openai/v1/chat/completions'
+                    $body = @{
+                        model       = 'qwen/qwen3.8-27b'
+                        messages    = @(
+                            @{ role = 'system'; content = $sysPrompt }
+                            @{ role = 'user';   content = $q }
+                        )
+                        max_tokens  = if ($isCoding) { 2048 } else { 150 }
+                        temperature = 0.05
+                    } | ConvertTo-Json -Depth 5
+                    $hdr = @{ 'Authorization' = "Bearer $k"; 'Content-Type' = 'application/json' }
+                    $res = Invoke-RestMethod -Uri $url -Method POST -Headers $hdr -Body $body -TimeoutSec 15 -ErrorAction Stop
+                    $rawAns = $res.choices[0].message.content.Trim()
                 } else {
-                    'https://openrouter.ai/api/v1/chat/completions'
+                    # OpenRouter
+                    $url = 'https://openrouter.ai/api/v1/chat/completions'
+                    $body = @{
+                        model       = 'meta-llama/llama-3.3-70b-instruct:free'
+                        messages    = @(
+                            @{ role = 'system'; content = $sysPrompt }
+                            @{ role = 'user';   content = $q }
+                        )
+                        max_tokens  = if ($isCoding) { 2048 } else { 150 }
+                        temperature = 0.05
+                    } | ConvertTo-Json -Depth 5
+                    $hdr = @{
+                        'Authorization' = "Bearer $k"
+                        'Content-Type'  = 'application/json'
+                        'HTTP-Referer'  = 'https://github.com/Evangelion-eva/Stealth'
+                        'X-Title'       = 'Stealth Overlay'
+                    }
+                    $res = Invoke-RestMethod -Uri $url -Method POST -Headers $hdr -Body $body -TimeoutSec 15 -ErrorAction Stop
+                    $rawAns = $res.choices[0].message.content.Trim()
                 }
 
-                $hdr = @{ 'Authorization' = "Bearer $($entry.Key)"; 'Content-Type' = 'application/json' }
-                if ($entry.Provider -eq 'openrouter') {
-                    $hdr['HTTP-Referer'] = 'https://github.com/stealth-assistant'
-                    $hdr['X-Title']      = 'Stealth Assistant'
-                }
-
-                $res = Invoke-RestMethod -Uri $url -Method POST -Headers $hdr -Body $body -TimeoutSec 15 -ErrorAction Stop
-                $rawAns = $res.choices[0].message.content.Trim()
-                
                 $isCodeRes = ($rawAns -match '(?s)```(?:[a-zA-Z0-9_#\+\-]+)?\s*[\r\n]+.*?```' -or $rawAns -match '(?m)^\s*(?:class\s+Solution|public\s+class|def\s+[a-zA-Z0-9_]+\s*\()' -or $lang -in @("java", "cpp", "python"))
                 
                 $detectedLang = "Ans"
@@ -1669,7 +1630,7 @@ function Start-AISolveFlow {
     }
 }
 
-$btnOCR.Add_Click({ Start-CombinedSolveFlow -SpecificLang "auto" })
+$btnOCR.Add_Click({ Start-AISolveFlow -SpecificLang "auto" })
 
 # --- Dragging the Micro Bar ---
 $script:barDrag = $false
@@ -1946,7 +1907,7 @@ function Show-SettingsPanel {
     $lblProv.ForeColor = [System.Drawing.Color]::FromArgb(226, 232, 240)
 
     $cbProv = New-Object System.Windows.Forms.ComboBox
-    $cbProv.Items.AddRange(@("groq", "openrouter"))
+    $cbProv.Items.AddRange(@("groq", "gemini", "openrouter"))
     $cbProv.SelectedIndex = 0; $cbProv.Location = New-Object System.Drawing.Point(80, 12); $cbProv.Size = New-Object System.Drawing.Size(100, 22)
     $cbProv.BackColor = [System.Drawing.Color]::FromArgb(30, 34, 48); $cbProv.ForeColor = [System.Drawing.Color]::White
 
@@ -2174,7 +2135,7 @@ $mQuit.ForeColor = [System.Drawing.Color]::FromArgb(240, 60, 60)
 
 $mBrw.Add_Click({ Toggle-StealthBrowser })
 $mCap.Add_Click({ Take-StealthScreenshot })
-$mSolve.Add_Click({ Start-CombinedSolveFlow -SpecificLang "auto" })
+$mSolve.Add_Click({ Start-AISolveFlow -SpecificLang "auto" })
 $mJava.Add_Click({ Start-AISolveFlow -SpecificLang "java" })
 $mCpp.Add_Click({ Start-AISolveFlow -SpecificLang "cpp" })
 $mPy.Add_Click({ Start-AISolveFlow -SpecificLang "python" })
@@ -2232,7 +2193,7 @@ $hkTimer.Add_Tick({
             switch ($k) {
                 1 { Toggle-StealthBrowser }
                 2 { Take-StealthScreenshot }
-                3 { Start-CombinedSolveFlow -SpecificLang "auto" }
+                3 { Start-AISolveFlow -SpecificLang "auto" }
                 4 { Quit-StealthAssistant }
                 5 { Start-AISolveFlow -SpecificLang "java" }
                 6 { Start-AISolveFlow -SpecificLang "cpp" }

@@ -27,3 +27,5 @@ wv2sdk/
 *.env
 secrets.*
 .aider*
+
+opencode.json
