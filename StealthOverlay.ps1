@@ -154,6 +154,18 @@ public class NoFocusButton : Button {
     }
 }
 
+public class NoFocusTextBox : TextBox {
+    const int WM_MOUSEACTIVATE = 0x0021;
+    const int MA_NOACTIVATE = 3;
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_MOUSEACTIVATE) {
+            m.Result = (IntPtr)MA_NOACTIVATE;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+}
+
 public class StealthHotkeyNW : NativeWindow {
     const int WM_HOTKEY = 0x0312;
     const int WM_MOUSEACTIVATE = 0x0021;
@@ -469,11 +481,18 @@ function Show-CodeSolution {
         $cleanCode = $cleanCode.Replace('\r\n', "`r`n").Replace('\n', "`r`n").Replace('\t', "    ")
     }
 
+    # Strip all code comments (single-line & multi-line) as requested
+    $noSingle = [regex]::Replace($cleanCode, '(?m)^\s*//.*?$', '')
+    $noBlock  = [regex]::Replace($noSingle, '(?s)/\*.*?\*/', '')
+    $noPyHash = if ($Lang -match '(?i)py') { [regex]::Replace($noBlock, '(?m)^\s*#.*?$', '') } else { $noBlock }
+
     $cleanLines = @()
     $maxLineLen = 25
-    foreach ($line in ($cleanCode -split "\r?\n")) {
-        $cleanLines += $line
-        if ($line.Length -gt $maxLineLen) { $maxLineLen = $line.Length }
+    foreach ($line in ($noPyHash -split "\r?\n")) {
+        if ($line.Trim() -ne '') {
+            $cleanLines += $line
+            if ($line.Length -gt $maxLineLen) { $maxLineLen = $line.Length }
+        }
     }
     $cleanCode = $cleanLines -join "`r`n"
     $script:latestCodeToCopy = $cleanCode
@@ -481,21 +500,15 @@ function Show-CodeSolution {
     $displayLang = if ($Lang -and $Lang.Trim() -ne "" -and $Lang -ne "auto") { $Lang.ToUpper() } else { "CODE" }
     $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 
-    # Remembered Size & Position Logic
+    # Dynamic content-adaptive sizing (always fits exactly what is needed without clipping)
+    $maxW = [int]($scr.Width * 0.72)
+    $maxH = [int]($scr.Height * 0.75)
+    $calcW = [Math]::Max(380, [Math]::Min($maxW, [int]($maxLineLen * 8.6 + 48)))
+    $calcH = [Math]::Max(140, [Math]::Min($maxH, [int]($cleanLines.Count * 18.2 + 44)))
+
     $hasSavedPos = ($script:winX -gt 0 -and $script:winY -gt 0)
-    $posX = if ($hasSavedPos) { $script:winX } else { [Math]::Max(20, [int]($scr.Width - 520)) }
-    $posY = if ($hasSavedPos) { $script:winY } else { 32 }
-    
-    $calcW = if ($script:winW -gt 200) {
-        $script:winW
-    } else {
-        [Math]::Max(380, [Math]::Min(680, [int]($maxLineLen * 8.2 + 36)))
-    }
-    $calcH = if ($script:winH -gt 100) {
-        $script:winH
-    } else {
-        [Math]::Max(140, [Math]::Min(480, [int]($cleanLines.Count * 17.5 + 38)))
-    }
+    $posX = if ($hasSavedPos) { [Math]::Min($script:winX, ($scr.Width - $calcW - 10)) } else { [Math]::Max(20, [int]($scr.Width - $calcW - 24)) }
+    $posY = if ($hasSavedPos) { [Math]::Min($script:winY, ($scr.Height - $calcH - 10)) } else { 32 }
 
     $cf = New-Object NoActivateForm
     $cf.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -617,7 +630,7 @@ function Show-CodeSolution {
     }
 
     # Code Display Box (100% Transparent Background, Adaptive High-Contrast Font)
-    $txtCode = New-Object System.Windows.Forms.TextBox
+    $txtCode = New-Object NoFocusTextBox
     $txtCode.Multiline   = $true
     $txtCode.ReadOnly    = $false
     $txtCode.ScrollBars  = if ($cleanLines.Count -gt 22) { [System.Windows.Forms.ScrollBars]::Vertical } else { [System.Windows.Forms.ScrollBars]::None }
@@ -1444,11 +1457,11 @@ function Execute-AIAsyncSolve {
         }
 
         if ($lang -in @("java", "cpp", "python")) {
-            $sysPrompt = "You are an expert competitive programmer.`nTarget: $lang.`n`nRULES:`n1. Output ONLY compilable optimal class Solution inside a markdown code block (```$lang).`n2. At top of code put: // Time: O(...) | Space: O(...)`n3. Zero conversational text, zero explanation outside code block. Just clean optimal solution."
+            $sysPrompt = "You are an expert competitive coding engine.`nTarget: $lang.`n`nRULES:`n1. Output ONLY pure, bug-free, optimal solution inside a single markdown code block (```$lang).`n2. ZERO COMMENTS. Do NOT write any '//', '/*', or '#' comments anywhere in the code. Zero time/space complexity notes.`n3. FUNCTION vs FULL CODE:`n   - If the problem asks to complete a specific function or class (like LeetCode, HackerRank, Solution class), provide ONLY the exact required class / function definition.`n   - If the problem is competitive programming asking to read from STDIN (Scanner, cin, sys.stdin) and print to STDOUT, provide the complete runnable program with main.`n4. Zero conversational filler, zero explanations, zero greetings."
         } elseif (-not $isCoding) {
             $sysPrompt = "You are a student taking a multiple-choice exam. Read the question and all options carefully.`nReply with ONLY:`nOption letter (A, B, C, or D) - [Option text] - [Brief reason in max 7 words]`nExample: 'B - Quicksort is not stable'`nIf multiple questions are present, format each on a new line:`nQ1: B - [Option text] - [Brief reason]`nQ2: A - [Option text] - [Brief reason]`nNo greetings, no conversational filler, no extra text."
         } else {
-            $sysPrompt = "You are an expert competitive programmer.`nRULES:`n1. Output ONLY optimal compilable class Solution inside a markdown code block.`n2. At top of code: // Time: O(...) | Space: O(...)`n3. Zero conversational text, zero explanation outside code block."
+            $sysPrompt = "You are an expert competitive coding engine.`nTarget: optimal standard language (Java, C++, or Python).`nRULES:`n1. Output ONLY pure optimal code inside a markdown code block.`n2. ZERO COMMENTS. Absolutely NO comments of any kind.`n3. If the problem requires completing a function or class Solution, provide only that. If standard competitive I/O is needed, provide full code with main.`n4. Zero conversational text."
         }
 
         $tried = 0
