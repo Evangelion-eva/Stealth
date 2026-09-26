@@ -115,8 +115,49 @@ public class StealthAPI {
     }
 }
 
+public class NoActivateForm : Form {
+    protected override bool ShowWithoutActivation { get { return true; } }
+    const int WM_MOUSEACTIVATE = 0x0021;
+    const int MA_NOACTIVATE = 3;
+    const int WS_EX_NOACTIVATE = 0x08000000;
+    const int WS_EX_TOOLWINDOW = 0x00000080;
+
+    protected override CreateParams CreateParams {
+        get {
+            CreateParams cp = base.CreateParams;
+            cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+            return cp;
+        }
+    }
+
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_MOUSEACTIVATE) {
+            m.Result = (IntPtr)MA_NOACTIVATE;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+}
+
+public class NoFocusButton : Button {
+    public NoFocusButton() {
+        SetStyle(ControlStyles.Selectable, false);
+    }
+    const int WM_MOUSEACTIVATE = 0x0021;
+    const int MA_NOACTIVATE = 3;
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_MOUSEACTIVATE) {
+            m.Result = (IntPtr)MA_NOACTIVATE;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+}
+
 public class StealthHotkeyNW : NativeWindow {
     const int WM_HOTKEY = 0x0312;
+    const int WM_MOUSEACTIVATE = 0x0021;
+    const int MA_NOACTIVATE = 3;
     public static int LastKey = 0;
     public const uint MOD_ALT = 1, MOD_CTRL = 2, MOD_SHIFT = 4, MOD_WIN = 8;
     public StealthHotkeyNW(IntPtr h) { AssignHandle(h); }
@@ -124,15 +165,25 @@ public class StealthHotkeyNW : NativeWindow {
         if (m.Msg == WM_HOTKEY) {
             LastKey = m.WParam.ToInt32();
         }
+        if (m.Msg == WM_MOUSEACTIVATE) {
+            m.Result = (IntPtr)MA_NOACTIVATE;
+            return;
+        }
         base.WndProc(ref m);
     }
 }
 
 public class ResizableBorderNW : NativeWindow {
     const int WM_NCHITTEST=0x84, HTLEFT=10, HTRIGHT=11, HTTOP=12, HTTOPLEFT=13, HTTOPRIGHT=14, HTBOTTOM=15, HTBOTTOMLEFT=16, HTBOTTOMRIGHT=17, HTCLIENT=1;
+    const int WM_MOUSEACTIVATE = 0x0021;
+    const int MA_NOACTIVATE = 3;
     Form _f; int _g;
     public ResizableBorderNW(Form f, int grip=6) { _f = f; _g = grip; AssignHandle(f.Handle); }
     protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_MOUSEACTIVATE) {
+            m.Result = (IntPtr)MA_NOACTIVATE;
+            return;
+        }
         base.WndProc(ref m);
         if (m.Msg == WM_NCHITTEST && (int)m.Result == HTCLIENT) {
             int lp = m.LParam.ToInt32();
@@ -446,7 +497,7 @@ function Show-CodeSolution {
         [Math]::Max(140, [Math]::Min(480, [int]($cleanLines.Count * 17.5 + 38)))
     }
 
-    $cf = New-Object System.Windows.Forms.Form
+    $cf = New-Object NoActivateForm
     $cf.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
     $cf.Size            = New-Object System.Drawing.Size($calcW, $calcH)
     $cf.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
@@ -460,7 +511,7 @@ function Show-CodeSolution {
     [void]$cf.Handle
     [StealthAPI]::ApplyStealthAffinity($cf.Handle, $script:config.StealthAffinity) | Out-Null
     $ex = [StealthAPI]::GetWindowLong($cf.Handle, [StealthAPI]::GWL_EXSTYLE)
-    [StealthAPI]::SetWindowLong($cf.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW) | Out-Null
+    [StealthAPI]::SetWindowLong($cf.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW -bor [StealthAPI]::WS_EX_NOACTIVATE) | Out-Null
     [StealthAPI]::SetWindowPos($cf.Handle, [StealthAPI]::HWND_TOPMOST, $posX, $posY, $calcW, $calcH, ([StealthAPI]::SWP_SHOWWINDOW -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
 
     # Header Bar: 100% Transparent
@@ -480,7 +531,7 @@ function Show-CodeSolution {
     $langBadge.Cursor    = [System.Windows.Forms.Cursors]::SizeAll
 
     # Contrast Invert Button (Camouflage for White vs Dark backgrounds)
-    $btnInv = New-Object System.Windows.Forms.Button
+    $btnInv = New-Object NoFocusButton
     $btnInv.Text = if ($script:config.CamouflageMode -eq "light") { "Lit" } else { "Inv" }
     $btnInv.Size = New-Object System.Drawing.Size(32, 18)
     $btnInv.Dock = [System.Windows.Forms.DockStyle]::Left
@@ -498,7 +549,7 @@ function Show-CodeSolution {
         }
     }
 
-    $btnClose = New-Object System.Windows.Forms.Button
+    $btnClose = New-Object NoFocusButton
     $btnClose.Text = "X"
     $btnClose.Size = New-Object System.Drawing.Size(20, 18)
     $btnClose.Dock = [System.Windows.Forms.DockStyle]::Right
@@ -513,7 +564,7 @@ function Show-CodeSolution {
     $btnClose.Add_MouseDown({ param($s,$e) & $closeAction })
 
     # Guaranteed Working Copy Button (Using Tag + Retry Loop)
-    $btnCopy = New-Object System.Windows.Forms.Button
+    $btnCopy = New-Object NoFocusButton
     $btnCopy.Text = "Copy"
     $btnCopy.Tag  = $cleanCode
     $btnCopy.Size = New-Object System.Drawing.Size(42, 18)
@@ -762,7 +813,7 @@ function Show-QuizAnswer {
     $bgKeyColor = if ($isDark) { [System.Drawing.Color]::FromArgb(16, 16, 24) } else { [System.Drawing.Color]::White }
     $fgColor    = if ($isDark) { [System.Drawing.Color]::FromArgb(240, 246, 252) } else { [System.Drawing.Color]::FromArgb(25, 25, 25) }
 
-    $af = New-Object System.Windows.Forms.Form
+    $af = New-Object NoActivateForm
     $af.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
     $af.BackColor       = $bgKeyColor
     $af.TransparencyKey = $bgKeyColor
@@ -1222,7 +1273,7 @@ function Toggle-StealthBrowser {
 
 # --- Dynamic Micro-Dot Overlay Bar ---
 $DOT_SIZE = 19; $GAP = 4
-$bar = New-Object System.Windows.Forms.Form
+$bar = New-Object NoActivateForm
 $bar.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $bar.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
 $bar.TopMost         = $true
@@ -1231,7 +1282,7 @@ $bar.BackColor       = [System.Drawing.Color]::Magenta
 $bar.TransparencyKey = [System.Drawing.Color]::Magenta
 
 function MakeDotBtn($c, $label, $tipText, $fgColor = [System.Drawing.Color]::White) {
-    $b = New-Object System.Windows.Forms.Button
+    $b = New-Object NoFocusButton
     $b.Size     = New-Object System.Drawing.Size($DOT_SIZE, $DOT_SIZE)
     $b.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $b.FlatAppearance.BorderSize = 0
@@ -2171,7 +2222,7 @@ $bar.Add_Shown({
 
     [StealthAPI]::ApplyStealthAffinity($bar.Handle, $script:config.StealthAffinity) | Out-Null
     $ex = [StealthAPI]::GetWindowLong($bar.Handle, [StealthAPI]::GWL_EXSTYLE)
-    [StealthAPI]::SetWindowLong($bar.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW) | Out-Null
+    [StealthAPI]::SetWindowLong($bar.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW -bor [StealthAPI]::WS_EX_NOACTIVATE) | Out-Null
     [StealthAPI]::SetWindowPos($bar.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0, ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_FRAMECHANGED)) | Out-Null
 
     try {
