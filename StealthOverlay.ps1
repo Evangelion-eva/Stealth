@@ -91,6 +91,12 @@ public class StealthAPI {
     public const uint SWP_NOMOVE        = 0x0002;
     public const uint SWP_NOSIZE        = 0x0001;
     public const uint SWP_FRAMECHANGED  = 0x0020;
+    public const uint SWP_NOACTIVATE    = 0x0010;
+    public const uint SWP_SHOWWINDOW    = 0x0040;
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
     public const int WM_NCLBUTTONDOWN   = 0x00A1;
     public const int HTCAPTION          = 2;
     public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
@@ -163,6 +169,102 @@ public class NoFocusTextBox : TextBox {
             return;
         }
         base.WndProc(ref m);
+    }
+}
+
+public class BrowserKeyRouter : IDisposable {
+    const int WH_KEYBOARD_LL = 13;
+    const uint WM_KEYDOWN    = 0x0100;
+    const uint WM_KEYUP      = 0x0101;
+    const uint WM_SYSKEYDOWN = 0x0104;
+    const uint WM_SYSKEYUP   = 0x0105;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr SetWindowsHookEx(int id, LLKeyProc cb, IntPtr hmod, uint tid);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool UnhookWindowsHookEx(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr CallNextHookEx(IntPtr h, int code, IntPtr wp, IntPtr lp);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool EnumChildWindows(IntPtr h, EnumChildCb cb, IntPtr lp);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetClassName(IntPtr h, System.Text.StringBuilder sb, int max);
+
+    delegate IntPtr LLKeyProc(int code, IntPtr wp, IntPtr lp);
+    delegate bool EnumChildCb(IntPtr h, IntPtr lp);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public IntPtr extra; }
+
+    IntPtr _hook;
+    LLKeyProc _cb;
+    IntPtr _formHwnd;
+    public bool Active;
+
+    public BrowserKeyRouter(IntPtr formHwnd) {
+        _formHwnd = formHwnd;
+        _cb = Proc;
+        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _cb, IntPtr.Zero, 0);
+    }
+
+    IntPtr FindChromeInput() {
+        return BrowserKeyRouter.FindChromeInput(_formHwnd);
+    }
+
+    IntPtr BuildLParam(KBDLLHOOKSTRUCT k, uint msg) {
+        uint repeat  = 1;
+        uint scan    = k.scanCode & 0xFF;
+        uint ext     = (k.flags & 0x01) != 0 ? 1u : 0u;
+        uint ctx     = (k.flags & 0x20) != 0 ? 1u : 0u;
+        uint prev    = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) ? 0u : 1u;
+        uint trans   = (msg == WM_KEYUP  || msg == WM_SYSKEYUP)   ? 1u : 0u;
+        return (IntPtr)(int)(repeat | (scan << 16) | (ext << 24) | (ctx << 29) | (prev << 30) | (trans << 31));
+    }
+
+    IntPtr Proc(int code, IntPtr wp, IntPtr lp) {
+        if (code >= 0 && Active) {
+            uint msg = (uint)wp.ToInt64();
+            if (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) {
+                var k = (KBDLLHOOKSTRUCT)System.Runtime.InteropServices.Marshal.PtrToStructure(lp, typeof(KBDLLHOOKSTRUCT));
+                IntPtr target = FindChromeInput();
+                if (target != IntPtr.Zero) {
+                    PostMessage(target, msg, (IntPtr)k.vkCode, BuildLParam(k, msg));
+                    return (IntPtr)1;
+                }
+            }
+        }
+        return CallNextHookEx(_hook, code, wp, lp);
+    }
+
+    public void Dispose() {
+        if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; }
+    }
+
+    public static IntPtr FindChromeInput(IntPtr parent) {
+        IntPtr found = IntPtr.Zero;
+        EnumChildWindows(parent, (h, lp) => {
+            var sb = new System.Text.StringBuilder(128);
+            GetClassName(h, sb, 128);
+            string cn = sb.ToString();
+            if (cn == "Chrome_RenderWidgetHostHWND" || cn == "Intermediate D3D Window") found = h;
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static void SendChar(IntPtr formHwnd, uint ch) {
+        IntPtr t = FindChromeInput(formHwnd);
+        if (t == IntPtr.Zero) t = formHwnd;
+        PostMessage(t, 0x0102, (IntPtr)ch, IntPtr.Zero);
+    }
+
+    public static void SendVKey(IntPtr formHwnd, uint vk) {
+        IntPtr t = FindChromeInput(formHwnd);
+        if (t == IntPtr.Zero) t = formHwnd;
+        PostMessage(t, 0x0100, (IntPtr)vk, (IntPtr)1);
+        PostMessage(t, 0x0101, (IntPtr)vk, (IntPtr)(unchecked((int)0xC0000001)));
     }
 }
 
@@ -905,7 +1007,7 @@ function Show-QuizAnswer {
 
 # --- Multi-Tab Stealth Browser ---
 $BW_W = 500; $BW_H = 520
-$bForm = New-Object System.Windows.Forms.Form
+$bForm = New-Object NoActivateForm
 $bForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $bForm.Size            = New-Object System.Drawing.Size($BW_W, $BW_H)
 $bForm.MinimumSize     = New-Object System.Drawing.Size(280, 220)
@@ -1009,7 +1111,8 @@ $tbTip.SetToolTip($tSolveTab, "Direct Solve content in active tab (Zero OCR lag!
 $tbTip.SetToolTip($tAddQ, "Paste captured question into Chat")
 $tbTip.SetToolTip($tAddLink, "Paste current URL into Chat")
 
-$tb.Controls.AddRange(@($tBack,$tFwd,$tRld,$tURL,$tGo,$tSolveTab,$tAddQ,$tAddLink,$tZin,$zoomLbl,$tZout))
+$tVK     = MakeTBtn "⌨"    476 24 $dk
+$tb.Controls.AddRange(@($tBack,$tFwd,$tRld,$tURL,$tGo,$tSolveTab,$tAddQ,$tAddLink,$tZin,$zoomLbl,$tZout,$tVK))
 
 $aiBar = New-Object System.Windows.Forms.Panel
 $aiBar.Dock = [System.Windows.Forms.DockStyle]::Top; $aiBar.Height = 28
@@ -1265,24 +1368,360 @@ $bForm.Add_Shown({
     [StealthAPI]::ApplyStealthAffinity($bForm.Handle, $script:config.StealthAffinity) | Out-Null
     $ex = [StealthAPI]::GetWindowLong($bForm.Handle, [StealthAPI]::GWL_EXSTYLE)
     [StealthAPI]::SetWindowLong($bForm.Handle, [StealthAPI]::GWL_EXSTYLE, $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW) | Out-Null
-    [StealthAPI]::SetWindowPos($bForm.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0, ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_FRAMECHANGED)) | Out-Null
+    [StealthAPI]::SetWindowPos($bForm.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0, ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_FRAMECHANGED -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
     if ($script:tabs.Count -eq 0) {
         Switch-BrowserTab "Gem" "https://gemini.google.com"
     }
 })
 
+$script:keyRouter = New-Object BrowserKeyRouter($bForm.Handle)
+
 function Toggle-StealthBrowser {
     if ($script:bVisible) {
-        $bForm.Hide(); $script:bVisible = $false
+        [StealthAPI]::ShowWindow($bForm.Handle, 0) | Out-Null
+        if ($script:vkForm -and -not $script:vkForm.IsDisposed -and $script:vkForm.Visible) {
+            [StealthAPI]::ShowWindow($script:vkForm.Handle, 0) | Out-Null
+        }
+        $script:bVisible = $false
         Write-Log "INFO" "Stealth Browser hidden."
     } else {
-        $bForm.Show()
+        [StealthAPI]::ShowWindow($bForm.Handle, 8) | Out-Null
         [StealthAPI]::ApplyStealthAffinity($bForm.Handle, $script:config.StealthAffinity) | Out-Null
-        [StealthAPI]::SetWindowPos($bForm.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0, ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_FRAMECHANGED)) | Out-Null
+        [StealthAPI]::SetWindowPos($bForm.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0, ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_FRAMECHANGED -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
         $script:bVisible = $true
         Write-Log "INFO" "Stealth Browser displayed."
     }
 }
+
+$script:vkForm = $null
+$script:vkShift = $false
+$script:vkInput = $null
+$script:vkTarget = "Page"
+$script:vkTargetBtn = $null
+
+function Submit-VKText {
+    if (-not $script:vkInput) { return }
+    $text = $script:vkInput.Text
+    if ([string]::IsNullOrWhiteSpace($text)) { return }
+
+    if ($script:vkTarget -eq "URL") {
+        $tURL.Text = $text
+        $tGo.PerformClick()
+        return
+    }
+
+    # Inject into active WebView2 page
+    $w = Get-ActiveWv
+    if (-not $w -or -not $w.CoreWebView2) { return }
+
+    $jsonText = $text | ConvertTo-Json -Compress
+    $js = @"
+(function() {
+    var text = $jsonText;
+    function isEditable(el) {
+        if (!el) return false;
+        var tag = (el.tagName || '').toLowerCase();
+        return tag === 'textarea' || tag === 'input' || el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.getAttribute('role') === 'textbox';
+    }
+
+    var el = document.activeElement;
+    while (el && el.shadowRoot && el.shadowRoot.activeElement) {
+        el = el.shadowRoot.activeElement;
+    }
+
+    if (!isEditable(el)) {
+        var selectors = [
+            'rich-textarea [contenteditable="true"]',
+            'div[contenteditable="true"][role="textbox"]',
+            'div[contenteditable="true"]',
+            '#prompt-textarea',
+            'textarea[name="q"]',
+            'textarea[placeholder*="Ask" i]',
+            'textarea[placeholder*="Message" i]',
+            'textarea[placeholder*="Prompt" i]',
+            'textarea',
+            'input[name="q"]',
+            'input[type="text"]',
+            'input[type="search"]'
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+            var found = document.querySelector(selectors[i]);
+            if (found && (found.offsetWidth > 0 || found.offsetHeight > 0)) {
+                el = found;
+                break;
+            }
+        }
+    }
+
+    if (el) {
+        el.focus();
+        if (el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.getAttribute('role') === 'textbox') {
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertText', false, text);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+            el.value = text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        setTimeout(function() {
+            var enterDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
+            var enterUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+            el.dispatchEvent(enterDown);
+            el.dispatchEvent(enterUp);
+
+            var sendBtn = document.querySelector('button[aria-label*="Send" i], button[aria-label*="Submit" i], button[data-testid*="send" i], button.send-button, form button[type="submit"]');
+            if (sendBtn) { sendBtn.click(); }
+        }, 100);
+    }
+})();
+"@
+    $w.CoreWebView2.ExecuteScriptAsync($js) | Out-Null
+}
+
+function Send-VKKey($label) {
+    if (-not $script:vkInput) { return }
+    switch ($label) {
+        "⌫" {
+            if ($script:vkInput.Text.Length -gt 0) {
+                $script:vkInput.Text = $script:vkInput.Text.Substring(0, $script:vkInput.Text.Length - 1)
+            }
+        }
+        "↵" {
+            Submit-VKText
+            return
+        }
+        "[Space]" {
+            $script:vkInput.Text += " "
+        }
+        "⇧" {
+            $script:vkShift = -not $script:vkShift
+            $col = if ($script:vkShift) { [System.Drawing.Color]::FromArgb(60,120,200) } else { [System.Drawing.Color]::FromArgb(35,35,55) }
+            if ($script:vkShiftBtn) { $script:vkShiftBtn.BackColor = $col }
+            foreach ($lb in $script:vkLetterBtns) {
+                $lb.Text = if ($script:vkShift) { $lb.Tag.ToUpper() } else { $lb.Tag }
+            }
+            return
+        }
+        default {
+            $ch = $label
+            if ($script:vkShift -and $ch -match '^[a-z]$') { $ch = $ch.ToUpper() }
+            $script:vkInput.Text += $ch
+        }
+    }
+
+    $script:vkInput.SelectionStart = $script:vkInput.Text.Length
+    $script:vkInput.ScrollToCaret()
+
+    if ($script:vkTarget -eq "URL") {
+        $tURL.Text = $script:vkInput.Text
+    }
+
+    if ($script:vkShift -and $label -match '^[a-z]$') {
+        $script:vkShift = $false
+        if ($script:vkShiftBtn) { $script:vkShiftBtn.BackColor = [System.Drawing.Color]::FromArgb(35,35,55) }
+        foreach ($lb in $script:vkLetterBtns) { $lb.Text = $lb.Tag }
+    }
+}
+
+function New-VirtualKeyboard {
+    if ($script:vkForm -and -not $script:vkForm.IsDisposed) {
+        if ($script:vkForm.Visible) {
+            [StealthAPI]::ShowWindow($script:vkForm.Handle, 0) | Out-Null
+        } else {
+            $bp = $bForm.Location
+            $vkY = [Math]::Max(5, ($bp.Y - 188))
+            $vkX = [Math]::Max(5, $bp.X)
+            $script:vkForm.Location = New-Object System.Drawing.Point($vkX, $vkY)
+            if ($script:vkTarget -eq "URL" -and $script:vkInput) {
+                $script:vkInput.Text = $tURL.Text
+            }
+            [StealthAPI]::ShowWindow($script:vkForm.Handle, 8) | Out-Null
+            [StealthAPI]::SetWindowPos($script:vkForm.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0,
+                ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
+        }
+        return
+    }
+
+    $vk = New-Object NoActivateForm
+    $vk.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $vk.TopMost         = $true
+    $vk.ShowInTaskbar   = $false
+    $vk.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
+    $vk.BackColor       = [System.Drawing.Color]::FromArgb(18, 18, 28)
+    $vk.Size            = New-Object System.Drawing.Size(412, 184)
+    $bp = $bForm.Location
+    $vkY = [Math]::Max(5, ($bp.Y - 188))
+    $vkX = [Math]::Max(5, $bp.X)
+    $vk.Location        = New-Object System.Drawing.Point($vkX, $vkY)
+
+    $ex = [StealthAPI]::GetWindowLong($vk.Handle, [StealthAPI]::GWL_EXSTYLE)
+    [StealthAPI]::SetWindowLong($vk.Handle, [StealthAPI]::GWL_EXSTYLE,
+        $ex -bor [StealthAPI]::WS_EX_TOOLWINDOW -bor [StealthAPI]::WS_EX_NOACTIVATE) | Out-Null
+
+    # --- Top Row: Connected Input Box + Actions ---
+    $script:vkInput = New-Object System.Windows.Forms.TextBox
+    $script:vkInput.Location    = New-Object System.Drawing.Point(6, 5)
+    $script:vkInput.Size        = New-Object System.Drawing.Size(200, 22)
+    $script:vkInput.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 54)
+    $script:vkInput.ForeColor   = [System.Drawing.Color]::White
+    $script:vkInput.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $script:vkInput.Font        = New-Object System.Drawing.Font("Segoe UI", 9)
+    $script:vkInput.TabStop     = $false
+    $script:vkInput.Text        = if ($script:vkTarget -eq "URL") { $tURL.Text } else { "" }
+    $script:vkInput.Add_KeyDown({
+        param($s,$e)
+        if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Return) {
+            Submit-VKText
+            $e.Handled = $true; $e.SuppressKeyPress = $true
+        }
+    })
+    $vk.Controls.Add($script:vkInput)
+
+    # Helper for top action buttons
+    function MakeVkActionBtn($txt, $x, $w, $bg, $tip, [scriptblock]$action) {
+        $btn = New-Object System.Windows.Forms.Button
+        $btn.TabStop = $false
+        $btn.Text = $txt
+        $btn.Location = New-Object System.Drawing.Point($x, 4)
+        $btn.Size = New-Object System.Drawing.Size($w, 24)
+        $btn.Font = New-Object System.Drawing.Font("Segoe UI", 7.5, [System.Drawing.FontStyle]::Bold)
+        $btn.ForeColor = [System.Drawing.Color]::White
+        $btn.BackColor = $bg
+        $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $btn.FlatAppearance.BorderSize = 0
+        $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $btn.Tag = $action
+        $btn.Add_MouseDown({
+            param($s,$e)
+            if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left -and $s.Tag) {
+                & $s.Tag
+            }
+        })
+        $vk.Controls.Add($btn)
+        return $btn
+    }
+
+    $script:vkTargetBtn = MakeVkActionBtn ">Page" 210 46 ([System.Drawing.Color]::FromArgb(35, 90, 210)) "Toggle Target: Web Page or URL Bar" {
+        if ($script:vkTarget -eq "Page") {
+            $script:vkTarget = "URL"
+            $script:vkTargetBtn.Text = ">URL"
+            $script:vkTargetBtn.BackColor = [System.Drawing.Color]::FromArgb(110, 50, 180)
+            if ($script:vkInput) { $script:vkInput.Text = $tURL.Text; $script:vkInput.SelectionStart = $script:vkInput.Text.Length }
+        } else {
+            $script:vkTarget = "Page"
+            $script:vkTargetBtn.Text = ">Page"
+            $script:vkTargetBtn.BackColor = [System.Drawing.Color]::FromArgb(35, 90, 210)
+        }
+    }
+
+    $vkSendBtn = MakeVkActionBtn "Send" 260 46 ([System.Drawing.Color]::FromArgb(24, 128, 56)) "Submit to Page or URL" {
+        Submit-VKText
+    }
+
+    $vkGoBtn = MakeVkActionBtn "Go" 310 32 ([System.Drawing.Color]::FromArgb(50, 50, 70)) "Navigate to URL" {
+        if ($script:vkInput -and -not [string]::IsNullOrWhiteSpace($script:vkInput.Text)) {
+            $tURL.Text = $script:vkInput.Text
+        }
+        $tGo.PerformClick()
+    }
+
+    $vkSearchBtn = MakeVkActionBtn "Find" 346 32 ([System.Drawing.Color]::FromArgb(210, 140, 20)) "Search Google" {
+        $txt = if ($script:vkInput) { $script:vkInput.Text.Trim() } else { "" }
+        if (-not [string]::IsNullOrWhiteSpace($txt)) {
+            $dest = "https://www.google.com/search?q=" + [System.Uri]::EscapeDataString($txt)
+            $tURL.Text = $dest
+            $w = Get-ActiveWv
+            if ($w -and $w.CoreWebView2) { $w.CoreWebView2.Navigate($dest) }
+        }
+    }
+
+    $vkClrBtn = MakeVkActionBtn "X" 382 22 ([System.Drawing.Color]::FromArgb(160, 40, 40)) "Clear Input" {
+        if ($script:vkInput) { $script:vkInput.Text = "" }
+        if ($script:vkTarget -eq "URL") { $tURL.Text = "" }
+    }
+
+    # --- Keyboard Layout ---
+    $KW = 28; $KH = 26; $KG = 2; $KY0 = 34
+
+    $rows = @(
+        @("1","2","3","4","5","6","7","8","9","0","-","=","⌫"),
+        @("q","w","e","r","t","y","u","i","o","p"),
+        @("a","s","d","f","g","h","j","k","l","↵"),
+        @("z","x","c","v","b","n","m",".","'","/"),
+        @("⇧","@","#","!","?","_","[Space]","(",")")
+    )
+
+    $script:vkShiftBtn = $null
+    $script:vkLetterBtns = @()
+
+    for ($ri = 0; $ri -lt $rows.Count; $ri++) {
+        $row  = $rows[$ri]
+        $rowW = $row.Count * ($KW + $KG) - $KG
+        if ($row -contains "[Space]") {
+            $spaceExtra = ($KW + $KG) * 3
+            $rowW += $spaceExtra
+        }
+        $xOff = [int](($vk.Width - $rowW) / 2)
+        $cx   = $xOff
+        foreach ($lbl in $row) {
+            $btnW = $KW
+            if ($lbl -eq "[Space]") { $btnW = $KW * 4 + $KG * 3 }
+            elseif ($lbl -eq "⌫")   { $btnW = $KW + 8 }
+            elseif ($lbl -eq "↵")   { $btnW = $KW + 8 }
+            elseif ($lbl -eq "⇧")   { $btnW = $KW + 8 }
+
+            $btn = New-Object System.Windows.Forms.Button
+            $btn.TabStop   = $false
+            $btn.Size      = New-Object System.Drawing.Size($btnW, $KH)
+            $btn.Location  = New-Object System.Drawing.Point($cx, ($KY0 + $ri * ($KH + $KG)))
+            $btn.Text      = if ($lbl -eq "[Space]") { "space" } else { $lbl }
+            $btn.Tag       = $lbl
+            $btn.Font      = New-Object System.Drawing.Font("Segoe UI", 7.5)
+            $btn.ForeColor = [System.Drawing.Color]::FromArgb(220, 220, 240)
+            $btn.BackColor = [System.Drawing.Color]::FromArgb(35, 35, 55)
+            $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            $btn.FlatAppearance.BorderSize  = 1
+            $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 90)
+            $btn.Cursor    = [System.Windows.Forms.Cursors]::Hand
+
+            if ($lbl -eq "⇧") { $script:vkShiftBtn = $btn }
+            if ($lbl -match '^[a-z]$') {
+                $script:vkLetterBtns += $btn
+            }
+
+            $btn.Add_MouseDown({
+                param($s,$e)
+                if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+                    Send-VKKey $s.Tag
+                }
+            })
+
+            $vk.Controls.Add($btn)
+            $cx += $btnW + $KG
+        }
+    }
+
+    $dragStart = $null
+    $vk.Add_MouseDown({ param($s,$e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { $script:vkDrag = $e.Location } })
+    $vk.Add_MouseMove({ param($s,$e)
+        if ($script:vkDrag) {
+            $sp = $s.PointToScreen($e.Location)
+            $s.Location = New-Object System.Drawing.Point(($sp.X - $script:vkDrag.X), ($sp.Y - $script:vkDrag.Y))
+        }
+    })
+    $vk.Add_MouseUp({ $script:vkDrag = $null })
+
+    $script:vkForm = $vk
+    [StealthAPI]::ShowWindow($vk.Handle, 8) | Out-Null
+    [StealthAPI]::ApplyStealthAffinity($vk.Handle, $script:config.StealthAffinity) | Out-Null
+    [StealthAPI]::SetWindowPos($vk.Handle, [StealthAPI]::HWND_TOPMOST, 0, 0, 0, 0,
+        ([StealthAPI]::SWP_NOMOVE -bor [StealthAPI]::SWP_NOSIZE -bor [StealthAPI]::SWP_NOACTIVATE)) | Out-Null
+}
+
+$tVK.Add_Click({ New-VirtualKeyboard })
 
 # --- Dynamic Micro-Dot Overlay Bar ---
 $DOT_SIZE = 19; $GAP = 4
@@ -2152,6 +2591,8 @@ function Quit-StealthAssistant {
 
     try { if ($bar) { $bar.Hide(); $bar.Close(); $bar.Dispose() } } catch {}
     try { if ($bForm) { $bForm.Hide(); $bForm.Close(); $bForm.Dispose() } } catch {}
+    try { if ($script:keyRouter) { $script:keyRouter.Dispose() } } catch {}
+    try { if ($script:vkForm -and -not $script:vkForm.IsDisposed) { $script:vkForm.Close(); $script:vkForm.Dispose() } } catch {}
     try { if ($script:aiLabel) { $script:aiLabel.Close(); $script:aiLabel.Dispose() } } catch {}
     try { if ($script:codeForm) { $script:codeForm.Close(); $script:codeForm.Dispose() } } catch {}
     try { if ($script:guiLogForm) { $script:guiLogForm.Close(); $script:guiLogForm.Dispose() } } catch {}
